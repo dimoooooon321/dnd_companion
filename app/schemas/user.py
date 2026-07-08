@@ -5,12 +5,21 @@ class UserCreate(BaseModel):
 
     email: EmailStr
     password: str
+    role: str = "player"
+
+
+
+class UserLogin(BaseModel):
+
+    email: EmailStr
+    password: str
+
 
 
 class UserResponse(BaseModel):
 
     id: int
-    email: EmailStr
+    email: str
     role: str
 
     class Config:
