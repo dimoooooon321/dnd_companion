@@ -1,16 +1,23 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 
 from app.core.database import get_db
+from app.models.campaign import Campaign
 from app.models.user import User
+from app.schemas.campaign_membership import CampaignMembershipCreate
 from app.schemas.campaign import (
     CampaignCreate,
     CampaignResponse
 )
+from app.schemas.character import CharacterResponse
 
 from app.api.dependencies import get_current_user
-from app.models.campaign import Campaign
+from app.services.campaign_service import create_campaign as create_campaign_service
+from app.services.campaign_membership_service import (
+    add_character_to_campaign,
+    get_campaign_members,
+)
 
 
 router = APIRouter(
@@ -29,17 +36,55 @@ def create_campaign(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user)
 ):
+    if user.role != "dm":
+        raise HTTPException(
+            status_code=403,
+            detail="Only DM can create campaigns"
+        )
 
-    new_campaign = Campaign(
+    return create_campaign_service(
+        db=db,
+        user_id=user.id,
         name=campaign.name,
         description=campaign.description,
-        dm_id=user.id
     )
 
 
-    db.add(new_campaign)
-    db.commit()
-    db.refresh(new_campaign)
+@router.post(
+    "/{campaign_id}/members",
+)
+def add_campaign_member(
+    campaign_id: int,
+    payload: CampaignMembershipCreate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    return add_character_to_campaign(
+        db=db,
+        campaign_id=campaign_id,
+        dm_id=user.id,
+        character_id=payload.character_id,
+    )
 
 
-    return new_campaign
+@router.get(
+    "/{campaign_id}/members",
+    response_model=list[CharacterResponse],
+)
+def get_campaign_members_endpoint(
+    campaign_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    campaign = db.query(Campaign).filter(Campaign.id == campaign_id).first()
+
+    if campaign is None:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+
+    if campaign.dm_id != user.id:
+        raise HTTPException(status_code=403, detail="Only campaign DM can view members")
+
+    return get_campaign_members(
+        db=db,
+        campaign_id=campaign_id,
+    )
