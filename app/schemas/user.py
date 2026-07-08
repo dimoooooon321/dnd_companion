@@ -1,17 +1,16 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 
 
 class UserCreate(BaseModel):
 
-    email: EmailStr
+    email: str
     password: str
     role: str = "player"
 
 
-
 class UserLogin(BaseModel):
 
-    email: EmailStr
+    email: str
     password: str
 
 
