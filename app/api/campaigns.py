@@ -10,11 +10,13 @@ from app.schemas.campaign_monster import (
     CampaignMonsterCreate,
     CampaignMonsterResponse,
 )
+from app.schemas.campaign_scene import CampaignSceneCreate, CampaignSceneResponse
 from app.schemas.campaign_membership import CampaignMembershipCreate
 from app.schemas.campaign import (
     CampaignCreate,
     CampaignResponse
 )
+from app.schemas.campaign_state import CampaignStateResponse
 from app.schemas.character import CharacterHpUpdate, CharacterResponse
 from app.schemas.item_request import ItemTransferRequestCreate, ItemTransferRequestResponse
 from app.services.campaign_event_service import broadcast_campaign_event
@@ -34,6 +36,13 @@ from app.services.campaign_monster_service import (
     add_monster_to_campaign,
     get_campaign_monsters,
 )
+from app.services.campaign_scene_service import (
+    activate_campaign_scene,
+    create_campaign_scene,
+    get_campaign_scenes,
+    get_current_campaign_scene,
+)
+from app.services.campaign_state_service import get_campaign_state
 from app.services.item_request_service import (
     create_item_request as create_item_request_service,
     get_item_requests_for_campaign as get_item_requests_for_campaign_service,
@@ -77,6 +86,23 @@ def get_campaign(
     user: User = Depends(get_current_user),
 ):
     return get_campaign_for_user(
+        db=db,
+        campaign_id=campaign_id,
+        user_id=user.id,
+        role=user.role,
+    )
+
+
+@router.get(
+    "/{campaign_id}/state",
+    response_model=CampaignStateResponse,
+)
+def get_campaign_state_endpoint(
+    campaign_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    return get_campaign_state(
         db=db,
         campaign_id=campaign_id,
         user_id=user.id,
@@ -145,6 +171,78 @@ def get_campaign_members_endpoint(
     return get_campaign_members(
         db=db,
         campaign_id=campaign_id,
+    )
+
+
+@router.post(
+    "/{campaign_id}/scenes",
+    response_model=CampaignSceneResponse,
+)
+def create_campaign_scene_endpoint(
+    campaign_id: int,
+    payload: CampaignSceneCreate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    return create_campaign_scene(
+        db=db,
+        campaign_id=campaign_id,
+        user_id=user.id,
+        title=payload.title,
+        description=payload.description,
+        image_url=payload.image_url,
+    )
+
+
+@router.get(
+    "/{campaign_id}/scenes",
+    response_model=list[CampaignSceneResponse],
+)
+def get_campaign_scenes_endpoint(
+    campaign_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    return get_campaign_scenes(
+        db=db,
+        campaign_id=campaign_id,
+        user_id=user.id,
+        role=user.role,
+    )
+
+
+@router.get(
+    "/{campaign_id}/current-scene",
+    response_model=CampaignSceneResponse | None,
+)
+def get_current_campaign_scene_endpoint(
+    campaign_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    return get_current_campaign_scene(
+        db=db,
+        campaign_id=campaign_id,
+        user_id=user.id,
+        role=user.role,
+    )
+
+
+@router.patch(
+    "/{campaign_id}/scenes/{scene_id}/activate",
+    response_model=CampaignSceneResponse,
+)
+def activate_campaign_scene_endpoint(
+    campaign_id: int,
+    scene_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    return activate_campaign_scene(
+        db=db,
+        campaign_id=campaign_id,
+        scene_id=scene_id,
+        user_id=user.id,
     )
 
 

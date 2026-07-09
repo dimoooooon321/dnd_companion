@@ -10,6 +10,7 @@ from app.core.database import Base
 if TYPE_CHECKING:
     from app.models.campaign_event import CampaignEvent
     from app.models.campaign_monster import CampaignMonster
+    from app.models.campaign_scene import CampaignScene
     from app.models.user import User
 
 
@@ -41,6 +42,12 @@ class Campaign(Base):
 
     campaign_events: Mapped[list["CampaignEvent"]] = relationship(
         "CampaignEvent",
+        back_populates="campaign",
+        cascade="all, delete-orphan",
+    )
+
+    campaign_scenes: Mapped[list["CampaignScene"]] = relationship(
+        "CampaignScene",
         back_populates="campaign",
         cascade="all, delete-orphan",
     )
