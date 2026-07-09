@@ -19,6 +19,10 @@ class CharacterCreate(BaseModel):
     charisma: int = 10
 
 
+class CharacterHpUpdate(BaseModel):
+    hp: int
+
+
 class CharacterResponse(BaseModel):
     id: int
     name: str

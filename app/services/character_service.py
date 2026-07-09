@@ -1,5 +1,8 @@
+from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
+from app.models.campaign import Campaign
+from app.models.campaign_membership import CampaignMembership
 from app.models.character import Character
 
 
@@ -71,6 +74,48 @@ def update_character(db: Session, character_id: int, owner_id: int, data):
     if "max_hp" in payload and payload["max_hp"] is not None and payload.get("current_hp") is None:
         character.current_hp = payload["max_hp"]
 
+    db.commit()
+    db.refresh(character)
+
+    return character
+
+
+def update_character_hp(
+    db: Session,
+    campaign_id: int,
+    character_id: int,
+    dm_id: int,
+    hp: int,
+):
+    campaign = (
+        db.query(Campaign)
+        .filter(Campaign.id == campaign_id, Campaign.dm_id == dm_id)
+        .first()
+    )
+
+    if campaign is None:
+        campaign_exists = db.query(Campaign.id).filter(Campaign.id == campaign_id).first()
+        if campaign_exists is None:
+            raise HTTPException(status_code=404, detail="Campaign not found")
+
+        raise HTTPException(status_code=403, detail="Only campaign DM can update HP")
+
+    character = db.query(Character).filter(Character.id == character_id).first()
+    if character is None:
+        raise HTTPException(status_code=404, detail="Character not found")
+
+    membership = (
+        db.query(CampaignMembership.id)
+        .filter(
+            CampaignMembership.campaign_id == campaign_id,
+            CampaignMembership.character_id == character_id,
+        )
+        .first()
+    )
+    if membership is None:
+        raise HTTPException(status_code=404, detail="Character not found in campaign")
+
+    character.current_hp = hp
     db.commit()
     db.refresh(character)
 
