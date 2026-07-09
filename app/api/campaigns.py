@@ -15,6 +15,7 @@ from app.schemas.campaign import (
     CampaignResponse
 )
 from app.schemas.character import CharacterResponse
+from app.schemas.item_request import ItemTransferRequestCreate, ItemTransferRequestResponse
 
 from app.api.dependencies import get_current_user
 from app.services.campaign_service import (
@@ -29,6 +30,10 @@ from app.services.campaign_membership_service import (
 from app.services.campaign_monster_service import (
     add_monster_to_campaign,
     get_campaign_monsters,
+)
+from app.services.item_request_service import (
+    create_item_request as create_item_request_service,
+    get_item_requests_for_campaign as get_item_requests_for_campaign_service,
 )
 
 
@@ -163,6 +168,41 @@ def get_campaign_monsters_endpoint(
     user: User = Depends(get_current_user),
 ):
     return get_campaign_monsters(
+        db=db,
+        campaign_id=campaign_id,
+        user_id=user.id,
+        role=user.role,
+    )
+
+
+@router.post(
+    "/{campaign_id}/items/request",
+    response_model=ItemTransferRequestResponse,
+)
+def request_item(
+    campaign_id: int,
+    payload: ItemTransferRequestCreate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    return create_item_request_service(
+        db=db,
+        campaign_id=campaign_id,
+        user_id=user.id,
+        data=payload,
+    )
+
+
+@router.get(
+    "/{campaign_id}/item-requests",
+    response_model=list[ItemTransferRequestResponse],
+)
+def get_item_requests(
+    campaign_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    return get_item_requests_for_campaign_service(
         db=db,
         campaign_id=campaign_id,
         user_id=user.id,

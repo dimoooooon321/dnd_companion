@@ -5,12 +5,14 @@ from app.api.dependencies import get_current_user
 from app.core.database import get_db
 from app.models.user import User
 from app.schemas.character import CharacterCreate, CharacterResponse
+from app.schemas.character_item import CharacterItemResponse
 from app.services.character_service import (
     create_character,
     get_character_by_id,
     get_user_characters,
     update_character,
 )
+from app.services.inventory_service import get_character_inventory
 
 
 router = APIRouter(prefix="/characters", tags=["Characters"])
@@ -56,3 +58,17 @@ def update_character_route(
     if character is None:
         raise HTTPException(status_code=404, detail="Character not found")
     return character
+
+
+@router.get("/{character_id}/inventory", response_model=list[CharacterItemResponse])
+def get_inventory(
+    character_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return get_character_inventory(
+        db=db,
+        character_id=character_id,
+        user_id=current_user.id,
+        role=current_user.role,
+    )
