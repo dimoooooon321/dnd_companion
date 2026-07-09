@@ -6,6 +6,7 @@ from app.core.database import get_db
 from app.models.campaign import Campaign
 from app.models.user import User
 from app.schemas.campaign_event import CampaignEventResponse
+from app.schemas.battle_map import BattleMapCreate, BattleMapResponse
 from app.schemas.campaign_monster import (
     CampaignMonsterCreate,
     CampaignMonsterResponse,
@@ -46,6 +47,10 @@ from app.services.campaign_state_service import get_campaign_state
 from app.services.item_request_service import (
     create_item_request as create_item_request_service,
     get_item_requests_for_campaign as get_item_requests_for_campaign_service,
+)
+from app.services.battle_map_service import (
+    create_battle_map,
+    get_battle_maps_for_campaign,
 )
 from pydantic import BaseModel
 from app.services.character_service import update_character_hp
@@ -108,8 +113,6 @@ def get_campaign_state_endpoint(
         user_id=user.id,
         role=user.role,
     )
-
-
 
 @router.post(
     "/",
@@ -204,6 +207,43 @@ def get_campaign_scenes_endpoint(
     user: User = Depends(get_current_user),
 ):
     return get_campaign_scenes(
+        db=db,
+        campaign_id=campaign_id,
+        user_id=user.id,
+        role=user.role,
+    )
+
+
+@router.post(
+    "/{campaign_id}/battle-maps",
+    response_model=BattleMapResponse,
+)
+def create_campaign_battle_map_endpoint(
+    campaign_id: int,
+    payload: BattleMapCreate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    return create_battle_map(
+        db=db,
+        campaign_id=campaign_id,
+        user_id=user.id,
+        name=payload.name,
+        width=payload.width,
+        height=payload.height,
+    )
+
+
+@router.get(
+    "/{campaign_id}/battle-maps",
+    response_model=list[BattleMapResponse],
+)
+def get_campaign_battle_maps_endpoint(
+    campaign_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    return get_battle_maps_for_campaign(
         db=db,
         campaign_id=campaign_id,
         user_id=user.id,

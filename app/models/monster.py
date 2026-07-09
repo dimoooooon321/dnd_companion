@@ -7,6 +7,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base
 
 if TYPE_CHECKING:
+    from app.models.battle_token import BattleToken
     from app.models.campaign_monster import CampaignMonster
     from app.models.user import User
 
@@ -37,4 +38,8 @@ class Monster(Base):
         "CampaignMonster",
         back_populates="monster",
         cascade="all, delete-orphan",
+    )
+    battle_tokens: Mapped[list["BattleToken"]] = relationship(
+        "BattleToken",
+        back_populates="monster",
     )

@@ -8,6 +8,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base
 
 if TYPE_CHECKING:
+    from app.models.battle_map import BattleMap
     from app.models.campaign_event import CampaignEvent
     from app.models.campaign_monster import CampaignMonster
     from app.models.campaign_scene import CampaignScene
@@ -48,6 +49,12 @@ class Campaign(Base):
 
     campaign_scenes: Mapped[list["CampaignScene"]] = relationship(
         "CampaignScene",
+        back_populates="campaign",
+        cascade="all, delete-orphan",
+    )
+
+    battle_maps: Mapped[list["BattleMap"]] = relationship(
+        "BattleMap",
         back_populates="campaign",
         cascade="all, delete-orphan",
     )

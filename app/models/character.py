@@ -3,6 +3,11 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.models.battle_token import BattleToken
+
 
 class Character(Base):
     __tablename__ = "characters"
@@ -37,4 +42,8 @@ class Character(Base):
         "CampaignMembership",
         back_populates="character",
         cascade="all, delete-orphan"
+    )
+    battle_tokens: Mapped[list["BattleToken"]] = relationship(
+        "BattleToken",
+        back_populates="character",
     )

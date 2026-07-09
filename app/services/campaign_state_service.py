@@ -1,5 +1,6 @@
 from sqlalchemy.orm import Session, joinedload
 
+from app.models.battle_map import BattleMap
 from app.models.campaign_event import CampaignEvent
 from app.models.campaign_membership import CampaignMembership
 from app.models.campaign_monster import CampaignMonster
@@ -45,6 +46,16 @@ def get_campaign_state(
         .all()
     )
 
+    battle_maps = (
+        db.query(BattleMap)
+        .options(joinedload(BattleMap.tokens))
+        .filter(BattleMap.campaign_id == campaign_id)
+        .order_by(BattleMap.id)
+        .all()
+    )
+    for battle_map in battle_maps:
+        battle_map.tokens.sort(key=lambda token: token.id)
+
     recent_events = (
         db.query(CampaignEvent)
         .filter(CampaignEvent.campaign_id == campaign_id)
@@ -60,4 +71,5 @@ def get_campaign_state(
         "characters": characters,
         "monsters": monsters,
         "recent_events": recent_events,
+        "battle_maps": battle_maps,
     }

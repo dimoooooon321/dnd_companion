@@ -61,6 +61,7 @@ def broadcast_campaign_event(
     campaign_id: int,
     event_type: str,
     data: dict[str, object],
+    websocket_data: dict[str, object] | None = None,
 ) -> CampaignEvent:
     event = create_campaign_event(
         db=db,
@@ -69,7 +70,7 @@ def broadcast_campaign_event(
         data=data,
     )
 
-    message = _build_websocket_message(event_type, data)
+    message = _build_websocket_message(event_type, websocket_data or data)
 
     try:
         anyio.from_thread.run(manager.broadcast, campaign_id, message)
