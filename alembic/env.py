@@ -12,8 +12,10 @@ from alembic import context
 from app.core.database import Base
 from app.models.user import User
 from app.models.campaign import Campaign
+from app.models.monster import Monster
 from app.models.character import Character
 from app.models.campaign_membership import CampaignMembership
+from app.models.campaign_monster import CampaignMonster
 
 print("ALEMBIC URL CHECK")
 print(settings.DATABASE_URL)

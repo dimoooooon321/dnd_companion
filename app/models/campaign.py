@@ -1,9 +1,15 @@
 from datetime import datetime
 
+from typing import TYPE_CHECKING
+
 from sqlalchemy import ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
+
+if TYPE_CHECKING:
+    from app.models.campaign_monster import CampaignMonster
+    from app.models.user import User
 
 
 class Campaign(Base):
@@ -24,4 +30,10 @@ class Campaign(Base):
         "CampaignMembership",
         back_populates="campaign",
         cascade="all, delete-orphan"
+    )
+
+    campaign_monsters: Mapped[list["CampaignMonster"]] = relationship(
+        "CampaignMonster",
+        back_populates="campaign",
+        cascade="all, delete-orphan",
     )

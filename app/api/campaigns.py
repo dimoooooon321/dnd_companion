@@ -5,6 +5,10 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.models.campaign import Campaign
 from app.models.user import User
+from app.schemas.campaign_monster import (
+    CampaignMonsterCreate,
+    CampaignMonsterResponse,
+)
 from app.schemas.campaign_membership import CampaignMembershipCreate
 from app.schemas.campaign import (
     CampaignCreate,
@@ -13,10 +17,18 @@ from app.schemas.campaign import (
 from app.schemas.character import CharacterResponse
 
 from app.api.dependencies import get_current_user
-from app.services.campaign_service import create_campaign as create_campaign_service
+from app.services.campaign_service import (
+    create_campaign as create_campaign_service,
+    get_campaign_for_user,
+    get_campaigns_for_user,
+)
 from app.services.campaign_membership_service import (
     add_character_to_campaign,
     get_campaign_members,
+)
+from app.services.campaign_monster_service import (
+    add_monster_to_campaign,
+    get_campaign_monsters,
 )
 
 
@@ -24,6 +36,38 @@ router = APIRouter(
     prefix="/campaigns",
     tags=["Campaigns"]
 )
+
+
+@router.get(
+    "/",
+    response_model=list[CampaignResponse],
+)
+def list_campaigns(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    return get_campaigns_for_user(
+        db=db,
+        user_id=user.id,
+        role=user.role,
+    )
+
+
+@router.get(
+    "/{campaign_id}",
+    response_model=CampaignResponse,
+)
+def get_campaign(
+    campaign_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    return get_campaign_for_user(
+        db=db,
+        campaign_id=campaign_id,
+        user_id=user.id,
+        role=user.role,
+    )
 
 
 
@@ -87,4 +131,40 @@ def get_campaign_members_endpoint(
     return get_campaign_members(
         db=db,
         campaign_id=campaign_id,
+    )
+
+
+@router.post(
+    "/{campaign_id}/monsters",
+    response_model=CampaignMonsterResponse,
+)
+def add_campaign_monster(
+    campaign_id: int,
+    payload: CampaignMonsterCreate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    return add_monster_to_campaign(
+        db=db,
+        campaign_id=campaign_id,
+        dm_id=user.id,
+        monster_id=payload.monster_id,
+        quantity=payload.quantity,
+    )
+
+
+@router.get(
+    "/{campaign_id}/monsters",
+    response_model=list[CampaignMonsterResponse],
+)
+def get_campaign_monsters_endpoint(
+    campaign_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    return get_campaign_monsters(
+        db=db,
+        campaign_id=campaign_id,
+        user_id=user.id,
+        role=user.role,
     )

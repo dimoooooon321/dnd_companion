@@ -2,6 +2,7 @@ from fastapi import FastAPI
 
 #это последний добавленный
 from app.api import characters
+from app.api import monsters
 
 from app.api import campaigns
 # это первый добавленный
@@ -23,6 +24,10 @@ app.include_router(
 
 app.include_router(
     characters.router
+)
+
+app.include_router(
+    monsters.router
 )
 
 @app.get("/")

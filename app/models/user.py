@@ -10,6 +10,7 @@ from app.core.database import Base
 
 if TYPE_CHECKING:
     from app.models.character import Character
+    from app.models.monster import Monster
 
 
 class UserRole(str, Enum):
@@ -37,5 +38,11 @@ class User(Base):
     characters: Mapped[list["Character"]] = relationship(
         "Character",
         back_populates="owner",
+        cascade="all, delete-orphan"
+    )
+
+    monsters: Mapped[list["Monster"]] = relationship(
+        "Monster",
+        back_populates="creator",
         cascade="all, delete-orphan"
     )
