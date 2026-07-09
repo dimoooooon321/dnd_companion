@@ -24,6 +24,7 @@ def approve_item_request(
     request = approve_item_request_service(db=db, request_id=request_id, user_id=user.id)
 
     broadcast_campaign_event(
+        db=db,
         campaign_id=request.campaign_id,
         event_type="inventory_updated",
         data={"character_id": request.character_id},

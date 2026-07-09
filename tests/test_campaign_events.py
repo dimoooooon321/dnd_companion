@@ -134,6 +134,22 @@ class CampaignEventTests(unittest.TestCase):
                     {"type": "hp_updated", "data": {"character_id": character_id, "hp": 15}},
                 )
 
+                events_response = client.get(
+                    f"/campaigns/{campaign_id}/events",
+                    headers=player_headers,
+                )
+                self.assertEqual(events_response.status_code, 200, events_response.text)
+
+                events = events_response.json()
+                self.assertEqual(len(events), 2, events)
+                self.assertEqual(events[0]["type"], "monster_added")
+                self.assertEqual(events[0]["data"], {"monster_id": monster_id})
+                self.assertEqual(events[1]["type"], "hp_updated")
+                self.assertEqual(
+                    events[1]["data"],
+                    {"character_id": character_id, "hp": 15},
+                )
+
                 dm_ws.receive_json()
                 dm_ws.receive_json()
 

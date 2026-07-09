@@ -1,5 +1,6 @@
 from app.models.user import User
 from app.models.campaign import Campaign
+from app.models.campaign_event import CampaignEvent
 from app.models.monster import Monster
 
 from app.models.character import Character

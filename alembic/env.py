@@ -12,6 +12,7 @@ from alembic import context
 from app.core.database import Base
 from app.models.user import User
 from app.models.campaign import Campaign
+from app.models.campaign_event import CampaignEvent
 from app.models.monster import Monster
 from app.models.character import Character
 from app.models.campaign_membership import CampaignMembership

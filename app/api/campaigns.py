@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.models.campaign import Campaign
 from app.models.user import User
+from app.schemas.campaign_event import CampaignEventResponse
 from app.schemas.campaign_monster import (
     CampaignMonsterCreate,
     CampaignMonsterResponse,
@@ -17,6 +18,7 @@ from app.schemas.campaign import (
 from app.schemas.character import CharacterHpUpdate, CharacterResponse
 from app.schemas.item_request import ItemTransferRequestCreate, ItemTransferRequestResponse
 from app.services.campaign_event_service import broadcast_campaign_event
+from app.services.campaign_event_service import get_campaign_events
 
 from app.api.dependencies import get_current_user
 from app.services.campaign_service import (
@@ -38,8 +40,6 @@ from app.services.item_request_service import (
 )
 from pydantic import BaseModel
 from app.services.character_service import update_character_hp
-from app.websocket.schemas import WebSocketEvent
-
 
 router = APIRouter(
     prefix="/campaigns",
@@ -167,6 +167,7 @@ def add_campaign_monster(
     )
 
     broadcast_campaign_event(
+        db=db,
         campaign_id=campaign_id,
         event_type="monster_added",
         data={"monster_id": campaign_monster.monster_id},
@@ -229,7 +230,7 @@ def get_item_requests(
 
 @router.post(
     "/{campaign_id}/events",
-    response_model=WebSocketEvent,
+    response_model=CampaignEventResponse,
 )
 def create_campaign_event(
     campaign_id: int,
@@ -245,13 +246,31 @@ def create_campaign_event(
 
         raise HTTPException(status_code=403, detail="Only campaign DM can send events")
 
-    broadcast_campaign_event(
+    event = broadcast_campaign_event(
+        db=db,
         campaign_id=campaign_id,
         event_type=payload.type,
         data={"text": payload.text},
     )
 
-    return WebSocketEvent(type=payload.type, data={"text": payload.text})
+    return event
+
+
+@router.get(
+    "/{campaign_id}/events",
+    response_model=list[CampaignEventResponse],
+)
+def get_campaign_events_endpoint(
+    campaign_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    return get_campaign_events(
+        db=db,
+        campaign_id=campaign_id,
+        user_id=user.id,
+        role=user.role,
+    )
 
 
 @router.patch(
@@ -274,6 +293,7 @@ def update_campaign_character_hp(
     )
 
     broadcast_campaign_event(
+        db=db,
         campaign_id=campaign_id,
         event_type="hp_updated",
         data={"character_id": character.id, "hp": character.current_hp},
