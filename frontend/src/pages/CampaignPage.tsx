@@ -1,189 +1,439 @@
-import { useEffect, useRef, useState } from 'react';
-import {
-  Alert,
-  Box,
-  Button,
-  Card,
-  CardContent,
-  Chip,
-  Divider,
-  Grid,
-  Paper,
-  Stack,
-  Typography,
-} from '@mui/material';
+import { useEffect, useState } from 'react';
+import { Alert, Box, Button, Stack, Typography } from '@mui/material';
 import { Link as RouterLink, useParams } from 'react-router-dom';
-import { getCampaignBattleMaps, getCampaignState } from '../api/campaigns';
+import {
+  getCampaignBattleMaps,
+  getCampaignMonsters,
+  getCampaignScenes,
+  getCampaignState,
+  getCharacterInventory,
+  getMonsters,
+} from '../api/campaigns';
+import { connectCampaignWebSocket, type CampaignWebSocketEvent } from '../api/websocket';
+import { BattleMapPanel } from '../components/campaign/BattleMapPanel';
+import { CampaignHeader } from '../components/campaign/CampaignHeader';
+import { CharacterList } from '../components/campaign/CharacterList';
+import { DmControls } from '../components/campaign/DmControls';
+import { EventList } from '../components/campaign/EventList';
+import { InventoryPanel } from '../components/campaign/InventoryPanel';
+import { MonsterList } from '../components/campaign/MonsterList';
+import { ScenePanel } from '../components/campaign/ScenePanel';
 import { PageShell } from '../components/PageShell';
+import { useAuth } from '../hooks/useAuth';
 import { getApiErrorMessage } from '../lib/apiError';
 import type {
   CampaignBattleMapDetails,
-  CampaignBattleMapState,
-  CampaignCharacterState,
   CampaignEventState,
+  CampaignSceneState,
   CampaignState,
 } from '../types/campaignState';
+import type { MonsterSummary } from '../types/monster';
+import type { CharacterInventoryItem } from '../types/inventory';
 
-const ABILITY_SCORE_LABELS: Array<{
-  key: keyof Pick<
-    CampaignCharacterState,
-    'strength' | 'dexterity' | 'constitution' | 'intelligence' | 'wisdom' | 'charisma'
-  >;
-  label: string;
-}> = [
-  { key: 'strength', label: 'STR' },
-  { key: 'dexterity', label: 'DEX' },
-  { key: 'constitution', label: 'CON' },
-  { key: 'intelligence', label: 'INT' },
-  { key: 'wisdom', label: 'WIS' },
-  { key: 'charisma', label: 'CHA' },
-];
+type ConnectionStatus = 'connected' | 'disconnected' | 'connecting' | 'reconnecting';
 
-const EVENT_TYPE_LABELS: Record<string, string> = {
-  monster_added: 'Monster added',
-  hp_updated: 'HP updated',
-  inventory_updated: 'Inventory updated',
-  scene_changed: 'Scene changed',
-  system: 'System',
-};
-
-function formatDateTime(value: string) {
-  return new Date(value).toLocaleString();
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
 }
 
-function formatLabelFromType(type: string) {
-  return EVENT_TYPE_LABELS[type] ?? type.replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
+function getNumberValue(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
-function formatEventDetails(event: CampaignEventState) {
-  const textValue = event.data.text;
+function getStringValue(value: unknown): string | null {
+  return typeof value === 'string' ? value : null;
+}
 
-  if (typeof textValue === 'string' && textValue.trim().length > 0) {
-    return textValue;
+function buildLocalEvent(
+  campaignId: number,
+  type: string,
+  data: Record<string, unknown>
+): CampaignEventState {
+  return {
+    id: Date.now() + Math.floor(Math.random() * 1000),
+    campaign_id: campaignId,
+    type,
+    data,
+    created_at: new Date().toISOString(),
+  };
+}
+
+function toCampaignScene(
+  campaignId: number,
+  payload: Record<string, unknown>,
+  fallbackCreatedAt: string
+): CampaignSceneState | null {
+  const sceneId = getNumberValue(payload.scene_id ?? payload.id);
+
+  if (sceneId === null) {
+    return null;
   }
 
-  const entries = Object.entries(event.data);
-
-  if (entries.length === 0) {
-    return 'Дополнительные данные отсутствуют.';
-  }
-
-  return entries
-    .map(([key, value]) => `${key}: ${typeof value === 'string' ? value : JSON.stringify(value)}`)
-    .join(' • ');
+  return {
+    id: sceneId,
+    campaign_id: campaignId,
+    title: getStringValue(payload.title) ?? 'Сцена',
+    description: getStringValue(payload.description) ?? '',
+    image_url: payload.image_url == null ? null : getStringValue(payload.image_url),
+    is_active: Boolean(payload.is_active),
+    created_at: getStringValue(payload.created_at) ?? fallbackCreatedAt,
+  };
 }
 
-function formatAbilityScores(character: CampaignCharacterState) {
-  const chips = ABILITY_SCORE_LABELS
-    .map(({ key, label }) => ({ label, value: character[key] }))
-    .filter((entry): entry is { label: string; value: number } => typeof entry.value === 'number');
-
-  if (chips.length === 0) {
-    return 'Характеристики не передаются текущим API.';
+function updateCampaignMonsters(
+  currentState: CampaignState | null,
+  monsters: CampaignState['monsters']
+): CampaignState | null {
+  if (!currentState) {
+    return currentState;
   }
 
-  return chips.map((entry) => `${entry.label} ${entry.value}`).join('  ');
+  return {
+    ...currentState,
+    monsters,
+  };
 }
 
-function findBattleMapName(
-  battleMap: CampaignBattleMapState,
-  battleMapDetailsById: Map<number, CampaignBattleMapDetails>,
-) {
-  return battleMapDetailsById.get(battleMap.id)?.name ?? `Боевая карта #${battleMap.id}`;
+function updateCharacterHp(
+  currentState: CampaignState | null,
+  characterId: number,
+  hp: number
+): CampaignState | null {
+  if (!currentState) {
+    return currentState;
+  }
+
+  return {
+    ...currentState,
+    characters: currentState.characters.map((character) =>
+      character.id === characterId ? { ...character, current_hp: hp } : character
+    ),
+  };
+}
+
+function updateTokenPosition(
+  currentState: CampaignState | null,
+  tokenId: number,
+  x: number,
+  y: number
+): CampaignState | null {
+  if (!currentState) {
+    return currentState;
+  }
+
+  return {
+    ...currentState,
+    battle_maps: currentState.battle_maps.map((battleMap) => ({
+      ...battleMap,
+      tokens: battleMap.tokens.map((token) => (token.id === tokenId ? { ...token, x, y } : token)),
+    })),
+  };
+}
+
+function appendEvent(currentState: CampaignState | null, event: CampaignEventState): CampaignState | null {
+  if (!currentState) {
+    return currentState;
+  }
+
+  return {
+    ...currentState,
+    recent_events: [...currentState.recent_events, event],
+  };
 }
 
 export function CampaignPage() {
   const { campaignId } = useParams();
   const [campaignState, setCampaignState] = useState<CampaignState | null>(null);
+  const [campaignScenes, setCampaignScenes] = useState<CampaignSceneState[]>([]);
   const [battleMapDetails, setBattleMapDetails] = useState<CampaignBattleMapDetails[]>([]);
+  const [availableMonsters, setAvailableMonsters] = useState<MonsterSummary[]>([]);
+  const [inventoriesByCharacterId, setInventoriesByCharacterId] = useState<Record<number, CharacterInventoryItem[]>>({});
   const [isLoading, setIsLoading] = useState(Boolean(campaignId));
   const [error, setError] = useState<string | null>(null);
-  const isMountedRef = useRef(true);
-
-  async function loadCampaignState(parsedCampaignId: number) {
-    setIsLoading(true);
-    setError(null);
-
-    try {
-      const [stateResult, battleMapsResult] = await Promise.allSettled([
-        getCampaignState(parsedCampaignId),
-        getCampaignBattleMaps(parsedCampaignId),
-      ]);
-
-      if (stateResult.status === 'rejected') {
-        throw stateResult.reason;
-      }
-
-      if (!isMountedRef.current) {
-        return;
-      }
-
-      setCampaignState(stateResult.value.data);
-
-      if (battleMapsResult.status === 'fulfilled') {
-        setBattleMapDetails(battleMapsResult.value.data);
-      } else {
-        setBattleMapDetails([]);
-      }
-    } catch (requestError) {
-      if (!isMountedRef.current) {
-        return;
-      }
-
-      setCampaignState(null);
-      setBattleMapDetails([]);
-      setError(getApiErrorMessage(requestError, 'Не удалось загрузить state кампании.'));
-    } finally {
-      if (isMountedRef.current) {
-        setIsLoading(false);
-      }
-    }
-  }
+  const [reloadToken, setReloadToken] = useState(0);
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('disconnected');
+  const { user, token } = useAuth();
+  const [loadedCampaignId, setLoadedCampaignId] = useState<number | null>(null);
+  const isDm = user?.role === 'dm';
 
   useEffect(() => {
-    isMountedRef.current = true;
+    let isActive = true;
 
-    if (!campaignId) {
-      setCampaignState(null);
-      setBattleMapDetails([]);
-      setIsLoading(false);
-      setError(null);
+    async function loadCampaignData() {
+      if (!campaignId) {
+        if (isActive) {
+          setCampaignState(null);
+          setCampaignScenes([]);
+          setBattleMapDetails([]);
+          setAvailableMonsters([]);
+          setInventoriesByCharacterId({});
+          setLoadedCampaignId(null);
+          setIsLoading(false);
+          setError(null);
+        }
+        return;
+      }
+
+      const parsedCampaignId = Number(campaignId);
+
+      if (Number.isNaN(parsedCampaignId)) {
+        if (isActive) {
+          setCampaignState(null);
+          setCampaignScenes([]);
+          setBattleMapDetails([]);
+          setAvailableMonsters([]);
+          setInventoriesByCharacterId({});
+          setLoadedCampaignId(null);
+          setIsLoading(false);
+          setError('Некорректный идентификатор кампании.');
+        }
+        return;
+      }
+
+      if (isActive) {
+        setIsLoading(true);
+        setError(null);
+      }
+
+      try {
+        const [stateResult, battleMapsResult, scenesResult, monstersResult] = await Promise.allSettled([
+          getCampaignState(parsedCampaignId),
+          getCampaignBattleMaps(parsedCampaignId),
+          getCampaignScenes(parsedCampaignId),
+          isDm ? getMonsters() : Promise.resolve({ data: [] as MonsterSummary[] }),
+        ]);
+
+        if (stateResult.status === 'rejected') {
+          throw stateResult.reason;
+        }
+
+        if (!isActive) {
+          return;
+        }
+
+        setCampaignState(stateResult.value.data);
+        setLoadedCampaignId(parsedCampaignId);
+        setBattleMapDetails(battleMapsResult.status === 'fulfilled' ? battleMapsResult.value.data : []);
+        setCampaignScenes(scenesResult.status === 'fulfilled' ? scenesResult.value.data : []);
+        setAvailableMonsters(monstersResult.status === 'fulfilled' ? monstersResult.value.data : []);
+
+        const characterInventories = await Promise.allSettled(
+          stateResult.value.data.characters.map((character) => getCharacterInventory(character.id))
+        );
+
+        if (!isActive) {
+          return;
+        }
+
+        const nextInventories: Record<number, CharacterInventoryItem[]> = {};
+        characterInventories.forEach((result, index) => {
+          if (result.status === 'fulfilled') {
+            const character = stateResult.value.data.characters[index];
+            nextInventories[character.id] = result.value.data;
+          }
+        });
+
+        setInventoriesByCharacterId(nextInventories);
+      } catch (requestError) {
+        if (!isActive) {
+          return;
+        }
+
+        setCampaignState(null);
+        setCampaignScenes([]);
+        setBattleMapDetails([]);
+        setAvailableMonsters([]);
+        setInventoriesByCharacterId({});
+        setError(getApiErrorMessage(requestError, 'Не удалось загрузить state кампании.'));
+      } finally {
+        if (isActive) {
+          setIsLoading(false);
+        }
+      }
+    }
+
+    void loadCampaignData();
+
+    return () => {
+      isActive = false;
+    };
+  }, [campaignId, isDm, reloadToken]);
+
+  useEffect(() => {
+    let isActive = true;
+
+    if (!campaignId || !token) {
+      setConnectionStatus('disconnected');
       return;
     }
 
     const parsedCampaignId = Number(campaignId);
 
-    if (Number.isNaN(parsedCampaignId)) {
-      setCampaignState(null);
-      setBattleMapDetails([]);
-      setIsLoading(false);
-      setError('Некорректный идентификатор кампании.');
+    if (Number.isNaN(parsedCampaignId) || loadedCampaignId !== parsedCampaignId) {
+      setConnectionStatus('disconnected');
       return;
     }
 
-    void loadCampaignState(parsedCampaignId);
+    setConnectionStatus('connecting');
+
+    const connection = connectCampaignWebSocket({
+      campaignId: parsedCampaignId,
+      token,
+      onOpen: () => {
+        if (isActive) {
+          setConnectionStatus('connected');
+        }
+      },
+      onClose: (event) => {
+        if (!isActive) {
+          return;
+        }
+
+        if (event.code === 1000 || event.code === 1008) {
+          setConnectionStatus('disconnected');
+          return;
+        }
+
+        setConnectionStatus('reconnecting');
+      },
+      onError: () => {
+        if (isActive) {
+          setConnectionStatus('disconnected');
+        }
+      },
+      onMessage: (message: CampaignWebSocketEvent) => {
+        if (!isActive) {
+          return;
+        }
+
+        const payload = isRecord(message.data) ? message.data : {};
+        const fallbackCreatedAt = new Date().toISOString();
+
+        if (message.type === 'monster_added') {
+          const monsterId = getNumberValue(payload.monster_id);
+          if (monsterId !== null) {
+            void getCampaignMonsters(parsedCampaignId)
+              .then((response) => {
+                if (!isActive) {
+                  return;
+                }
+                setCampaignState((currentState) => updateCampaignMonsters(currentState, response.data));
+              })
+              .catch(() => undefined);
+            setCampaignState((currentState) => appendEvent(currentState, buildLocalEvent(parsedCampaignId, message.type, payload)));
+          }
+          return;
+        }
+
+        if (message.type === 'hp_updated') {
+          const characterId = getNumberValue(payload.character_id);
+          const hp = getNumberValue(payload.hp);
+
+          if (characterId !== null && hp !== null) {
+            setCampaignState((currentState) => updateCharacterHp(currentState, characterId, hp));
+            setCampaignState((currentState) => appendEvent(currentState, buildLocalEvent(parsedCampaignId, message.type, payload)));
+          }
+          return;
+        }
+
+        if (message.type === 'inventory_updated') {
+          const characterId = getNumberValue(payload.character_id);
+
+          if (characterId !== null) {
+            void getCharacterInventory(characterId)
+              .then((response) => {
+                if (!isActive) {
+                  return;
+                }
+                setInventoriesByCharacterId((current) => ({
+                  ...current,
+                  [characterId]: response.data,
+                }));
+              })
+              .catch(() => undefined);
+            setCampaignState((currentState) => appendEvent(currentState, buildLocalEvent(parsedCampaignId, message.type, payload)));
+          }
+          return;
+        }
+
+        if (message.type === 'scene_changed') {
+          const scene = toCampaignScene(parsedCampaignId, payload, fallbackCreatedAt);
+
+          if (scene) {
+            setCampaignState((currentState) =>
+              currentState
+                ? {
+                    ...currentState,
+                    current_scene: scene,
+                  }
+                : currentState
+            );
+            setCampaignScenes((currentScenes) => {
+              const existingIndex = currentScenes.findIndex((entry) => entry.id === scene.id);
+
+              if (existingIndex === -1) {
+                return currentScenes.map((entry) => ({
+                  ...entry,
+                  is_active: entry.id === scene.id,
+                })).concat(scene);
+              }
+
+              return currentScenes.map((entry) =>
+                entry.id === scene.id
+                  ? {
+                      ...entry,
+                      ...scene,
+                    }
+                  : {
+                      ...entry,
+                      is_active: entry.id === scene.id,
+                    }
+              );
+            });
+            setCampaignState((currentState) => appendEvent(currentState, buildLocalEvent(parsedCampaignId, message.type, payload)));
+          }
+          return;
+        }
+
+        if (message.type === 'token_moved') {
+          const tokenId = getNumberValue(payload.token_id);
+          const x = getNumberValue(payload.x);
+          const y = getNumberValue(payload.y);
+
+          if (tokenId !== null && x !== null && y !== null) {
+            setCampaignState((currentState) => updateTokenPosition(currentState, tokenId, x, y));
+            setCampaignState((currentState) => appendEvent(currentState, buildLocalEvent(parsedCampaignId, message.type, payload)));
+          }
+          return;
+        }
+
+        if (message.type === 'system') {
+          setCampaignState((currentState) => appendEvent(currentState, buildLocalEvent(parsedCampaignId, message.type, payload)));
+        }
+      },
+    });
 
     return () => {
-      isMountedRef.current = false;
+      isActive = false;
+      connection.close();
+      setConnectionStatus('disconnected');
     };
-  }, [campaignId]);
+  }, [campaignId, loadedCampaignId, token]);
 
   if (!campaignId) {
     return (
       <PageShell title="Campaign">
-        <Paper variant="outlined" sx={{ p: 3 }}>
-          <Stack spacing={1.5}>
-            <Typography variant="h6">Выберите кампанию на Dashboard.</Typography>
-            <Typography color="text.secondary">
-              Здесь будет показано состояние кампании после перехода по ссылке Open.
-            </Typography>
-            <Box>
-              <Button component={RouterLink} to="/dashboard" variant="contained">
-                Go to Dashboard
-              </Button>
-            </Box>
-          </Stack>
-        </Paper>
+        <Stack spacing={1.5}>
+          <Typography variant="h6">Выберите кампанию на Dashboard.</Typography>
+          <Typography color="text.secondary">
+            Здесь будет показано состояние кампании после перехода по ссылке Open.
+          </Typography>
+          <Box>
+            <Button component={RouterLink} to="/dashboard" variant="contained">
+              Go to Dashboard
+            </Button>
+          </Box>
+        </Stack>
       </PageShell>
     );
   }
@@ -191,225 +441,56 @@ export function CampaignPage() {
   const parsedCampaignId = Number(campaignId);
   const activeCampaign = campaignState?.campaign ?? null;
   const participantsCount = campaignState?.characters.length ?? 0;
-  const battleMapDetailsById = new Map(battleMapDetails.map((battleMap) => [battleMap.id, battleMap]));
+  const battleMaps = campaignState?.battle_maps ?? [];
   const visibleEvents = campaignState ? [...campaignState.recent_events].reverse() : [];
+  const battleMapDetailsById = new Map(battleMapDetails.map((battleMap) => [battleMap.id, battleMap]));
+  const dmLabel = activeCampaign && user && activeCampaign.dm_id === user.id ? 'Вы' : activeCampaign ? `#${activeCampaign.dm_id}` : '—';
+  const handleRefresh = () => setReloadToken((value) => value + 1);
+
+  if (Number.isNaN(parsedCampaignId)) {
+    return (
+      <PageShell title="Campaign">
+        <Alert severity="error">Некорректный идентификатор кампании.</Alert>
+      </PageShell>
+    );
+  }
 
   return (
     <PageShell title="Campaign">
-      {error ? <Alert severity="error">{error}</Alert> : null}
-
       <Stack spacing={2}>
-        <Card variant="outlined">
-          <CardContent>
-            <Stack spacing={1.5}>
-              <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 2 }}>
-                <Box>
-                  <Typography variant="h5" component="h2">
-                    {activeCampaign?.name ?? `Campaign #${parsedCampaignId}`}
-                  </Typography>
-                  <Typography color="text.secondary" sx={{ mt: 0.5 }}>
-                    {activeCampaign?.description || 'Описание не указано'}
-                  </Typography>
-                </Box>
-                <Chip label={`Campaign #${parsedCampaignId}`} />
-              </Box>
+        {error ? <Alert severity="error">{error}</Alert> : null}
 
-              <Divider />
+        <CampaignHeader
+          campaign={activeCampaign}
+          campaignId={parsedCampaignId}
+          participantCount={participantsCount}
+          dmLabel={dmLabel}
+          connectionStatus={connectionStatus}
+          isLoading={isLoading}
+          onRefresh={handleRefresh}
+        />
 
-              <Grid container spacing={2}>
-                <Grid item xs={12} sm={4}>
-                  <Typography variant="body2" color="text.secondary">
-                    DM
-                  </Typography>
-                  <Typography variant="body1">{activeCampaign ? `#${activeCampaign.dm_id}` : '—'}</Typography>
-                </Grid>
-                <Grid item xs={12} sm={4}>
-                  <Typography variant="body2" color="text.secondary">
-                    Участники
-                  </Typography>
-                  <Typography variant="body1">{participantsCount}</Typography>
-                </Grid>
-                <Grid item xs={12} sm={4}>
-                  <Typography variant="body2" color="text.secondary">
-                    Campaign ID
-                  </Typography>
-                  <Typography variant="body1">{parsedCampaignId}</Typography>
-                </Grid>
-              </Grid>
-
-              <Box>
-                <Button variant="outlined" onClick={() => void loadCampaignState(parsedCampaignId)} disabled={isLoading}>
-                  Refresh
-                </Button>
-              </Box>
-            </Stack>
-          </CardContent>
-        </Card>
-
-        {isLoading && !campaignState ? (
-          <Typography color="text.secondary">Loading campaign state...</Typography>
+        {isDm ? (
+          <DmControls
+            campaignId={parsedCampaignId}
+            characters={campaignState?.characters ?? []}
+            scenes={campaignScenes}
+            availableMonsters={availableMonsters}
+            battleMaps={battleMaps}
+            battleMapDetailsById={battleMapDetailsById}
+          />
         ) : null}
 
-        <Card variant="outlined">
-          <CardContent>
-            <Stack spacing={2}>
-              <Typography variant="h6">Персонажи</Typography>
-              <Grid container spacing={2}>
-                {campaignState?.characters.length ? (
-                  campaignState.characters.map((character) => (
-                    <Grid item xs={12} sm={6} lg={4} key={character.id}>
-                      <Card variant="outlined">
-                        <CardContent>
-                          <Stack spacing={1}>
-                            <Typography variant="subtitle1">{character.name}</Typography>
-                            <Typography variant="body2" color="text.secondary">
-                              {character.race} · {character.class_name} · Level {character.level}
-                            </Typography>
-                            <Typography variant="body2">
-                              HP: {character.current_hp}/{character.max_hp}
-                            </Typography>
-                            <Typography variant="body2" color="text.secondary">
-                              {formatAbilityScores(character)}
-                            </Typography>
-                          </Stack>
-                        </CardContent>
-                      </Card>
-                    </Grid>
-                  ))
-                ) : (
-                  <Grid item xs={12}>
-                    <Typography color="text.secondary">Персонажи отсутствуют.</Typography>
-                  </Grid>
-                )}
-              </Grid>
-            </Stack>
-          </CardContent>
-        </Card>
-
-        <Card variant="outlined">
-          <CardContent>
-            <Stack spacing={2}>
-              <Typography variant="h6">Монстры</Typography>
-              <Grid container spacing={2}>
-                {campaignState?.monsters.length ? (
-                  campaignState.monsters.map((campaignMonster) => (
-                    <Grid item xs={12} sm={6} lg={4} key={campaignMonster.id}>
-                      <Card variant="outlined">
-                        <CardContent>
-                          <Stack spacing={1}>
-                            <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 1 }}>
-                              <Typography variant="subtitle1">{campaignMonster.monster.name}</Typography>
-                              <Chip size="small" label={`x${campaignMonster.quantity}`} />
-                            </Box>
-                            <Typography variant="body2" color="text.secondary">
-                              HP: {campaignMonster.monster.hp}
-                            </Typography>
-                            <Typography variant="body2" color="text.secondary">
-                              CR: {campaignMonster.monster.challenge_rating}
-                            </Typography>
-                            <Typography variant="body2">
-                              {campaignMonster.monster.description || 'Описание отсутствует.'}
-                            </Typography>
-                          </Stack>
-                        </CardContent>
-                      </Card>
-                    </Grid>
-                  ))
-                ) : (
-                  <Grid item xs={12}>
-                    <Typography color="text.secondary">Монстры отсутствуют.</Typography>
-                  </Grid>
-                )}
-              </Grid>
-            </Stack>
-          </CardContent>
-        </Card>
-
-        <Card variant="outlined">
-          <CardContent>
-            <Stack spacing={2}>
-              <Typography variant="h6">Активная сцена</Typography>
-              {campaignState?.current_scene ? (
-                <Card variant="outlined">
-                  <CardContent>
-                    <Stack spacing={1}>
-                      <Typography variant="subtitle1">{campaignState.current_scene.title}</Typography>
-                      <Typography variant="body2" color="text.secondary">
-                        {campaignState.current_scene.description}
-                      </Typography>
-                    </Stack>
-                  </CardContent>
-                </Card>
-              ) : (
-                <Typography color="text.secondary">Активная сцена отсутствует</Typography>
-              )}
-            </Stack>
-          </CardContent>
-        </Card>
-
-        <Card variant="outlined">
-          <CardContent>
-            <Stack spacing={2}>
-              <Typography variant="h6">История событий</Typography>
-              <Stack spacing={1.5}>
-                {visibleEvents.length ? (
-                  visibleEvents.map((event) => (
-                    <Card key={event.id} variant="outlined">
-                      <CardContent>
-                        <Stack spacing={0.75}>
-                          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
-                            <Chip size="small" label={formatLabelFromType(event.type)} />
-                            <Typography variant="caption" color="text.secondary">
-                              {formatDateTime(event.created_at)}
-                            </Typography>
-                          </Box>
-                          <Typography variant="body2">{formatEventDetails(event)}</Typography>
-                        </Stack>
-                      </CardContent>
-                    </Card>
-                  ))
-                ) : (
-                  <Typography color="text.secondary">События отсутствуют.</Typography>
-                )}
-              </Stack>
-            </Stack>
-          </CardContent>
-        </Card>
-
-        <Card variant="outlined">
-          <CardContent>
-            <Stack spacing={2}>
-              <Typography variant="h6">Боевая карта</Typography>
-              <Grid container spacing={2}>
-                {campaignState?.battle_maps.length ? (
-                  campaignState.battle_maps.map((battleMap) => (
-                    <Grid item xs={12} sm={6} lg={4} key={battleMap.id}>
-                      <Card variant="outlined">
-                        <CardContent>
-                          <Stack spacing={1}>
-                            <Typography variant="subtitle1">
-                              {findBattleMapName(battleMap, battleMapDetailsById)}
-                            </Typography>
-                            <Typography variant="body2" color="text.secondary">
-                              Размер: {battleMap.width} x {battleMap.height}
-                            </Typography>
-                            <Typography variant="body2" color="text.secondary">
-                              Токенов: {battleMap.tokens.length}
-                            </Typography>
-                          </Stack>
-                        </CardContent>
-                      </Card>
-                    </Grid>
-                  ))
-                ) : (
-                  <Grid item xs={12}>
-                    <Typography color="text.secondary">Боевые карты отсутствуют.</Typography>
-                  </Grid>
-                )}
-              </Grid>
-            </Stack>
-          </CardContent>
-        </Card>
+        <CharacterList characters={campaignState?.characters ?? []} isLoading={isLoading} />
+        <InventoryPanel
+          characters={campaignState?.characters ?? []}
+          inventoriesByCharacterId={inventoriesByCharacterId}
+          isLoading={isLoading}
+        />
+        <MonsterList monsters={campaignState?.monsters ?? []} isLoading={isLoading} />
+        <ScenePanel currentScene={campaignState?.current_scene ?? null} scenes={campaignScenes} isLoading={isLoading} />
+        <EventList events={visibleEvents} isLoading={isLoading} />
+        <BattleMapPanel battleMaps={battleMaps} battleMapDetailsById={battleMapDetailsById} isLoading={isLoading} />
       </Stack>
     </PageShell>
   );

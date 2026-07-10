@@ -7,13 +7,18 @@ import {
   CardActions,
   CardContent,
   Chip,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   Divider,
   Paper,
   Stack,
+  TextField,
   Typography,
 } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
-import { getCampaigns } from '../api/campaigns';
+import { createCampaign, getCampaigns } from '../api/campaigns';
 import { PageShell } from '../components/PageShell';
 import { getApiErrorMessage } from '../lib/apiError';
 import { useAuth } from '../hooks/useAuth';
@@ -23,8 +28,15 @@ export function DashboardPage() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [reloadToken, setReloadToken] = useState(0);
+  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+  const [createName, setCreateName] = useState('');
+  const [createDescription, setCreateDescription] = useState('');
+  const [isCreating, setIsCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
   const navigate = useNavigate();
   const { user } = useAuth();
+  const isDm = user?.role === 'dm';
 
   useEffect(() => {
     let isActive = true;
@@ -55,7 +67,32 @@ export function DashboardPage() {
     return () => {
       isActive = false;
     };
-  }, []);
+  }, [reloadToken]);
+
+  const openCreateDialog = () => {
+    setCreateName('');
+    setCreateDescription('');
+    setCreateError(null);
+    setIsCreateDialogOpen(true);
+  };
+
+  const handleCreateCampaign = async () => {
+    setIsCreating(true);
+    setCreateError(null);
+
+    try {
+      await createCampaign({
+        name: createName.trim(),
+        description: createDescription.trim(),
+      });
+      setIsCreateDialogOpen(false);
+      setReloadToken((value) => value + 1);
+    } catch (requestError) {
+      setCreateError(getApiErrorMessage(requestError, 'Не удалось создать кампанию.'));
+    } finally {
+      setIsCreating(false);
+    }
+  };
 
   const renderContent = () => {
     if (error) {
@@ -105,7 +142,9 @@ export function DashboardPage() {
             <Card key={campaign.id} variant="outlined">
               <CardContent>
                 <Stack spacing={1.5}>
-                  <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 2 }}>
+                  <Box
+                    sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 2 }}
+                  >
                     <Box>
                       <Typography variant="h6" component="h2">
                         {campaign.name}
@@ -143,10 +182,61 @@ export function DashboardPage() {
 
   return (
     <PageShell title="Dashboard">
-      <Typography color="text.secondary">
-        {user ? `Добро пожаловать, ${user.email}.` : 'Добро пожаловать.'}
-      </Typography>
-      <Box sx={{ mt: 2 }}>{renderContent()}</Box>
+      <Stack spacing={2}>
+        <Stack
+          direction={{ xs: 'column', sm: 'row' }}
+          spacing={2}
+          alignItems={{ sm: 'center' }}
+          justifyContent="space-between"
+        >
+          <Typography color="text.secondary">
+            {user ? `Добро пожаловать, ${user.email}.` : 'Добро пожаловать.'}
+          </Typography>
+          {isDm ? (
+            <Button variant="contained" onClick={openCreateDialog}>
+              Create Campaign
+            </Button>
+          ) : null}
+        </Stack>
+
+        <Box>{renderContent()}</Box>
+      </Stack>
+
+      <Dialog open={isCreateDialogOpen} onClose={() => setIsCreateDialogOpen(false)} fullWidth maxWidth="sm">
+        <DialogTitle>Create Campaign</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ pt: 1 }}>
+            {createError ? <Alert severity="error">{createError}</Alert> : null}
+            <TextField
+              label="Название"
+              value={createName}
+              onChange={(event) => setCreateName(event.target.value)}
+              fullWidth
+              autoFocus
+            />
+            <TextField
+              label="Описание"
+              value={createDescription}
+              onChange={(event) => setCreateDescription(event.target.value)}
+              fullWidth
+              multiline
+              minRows={3}
+            />
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setIsCreateDialogOpen(false)} disabled={isCreating}>
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            onClick={handleCreateCampaign}
+            disabled={isCreating || createName.trim().length === 0}
+          >
+            {isCreating ? 'Saving...' : 'Create'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </PageShell>
   );
 }
